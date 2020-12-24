@@ -40,15 +40,23 @@ const rAF = IS_SERVER
 const useIsomorphicLayoutEffect = IS_SERVER ? useEffect : useLayoutEffect
 
 // global state managers
+// 当前发起的请求，有可能是 Promise，也可能是值
+// 如果是 Promise 则代表请求进行中，
+// 如果是值则代表请求的结果
 const CONCURRENT_PROMISES = {}
+// 用来判断时序
 const CONCURRENT_PROMISES_TS = {}
 const FOCUS_REVALIDATORS = {}
 const RECONNECT_REVALIDATORS = {}
+// 绑定的是更新函数，只要有修改，都要走进来
 const CACHE_REVALIDATORS = {}
+// 下面两个都是用来判断时序的，MUTATION_END_TS 为 0 表示当前 mutate 还没结束
 const MUTATION_TS = {}
 const MUTATION_END_TS = {}
 
 // generate strictly increasing timestamps
+// 该方法只在 CONCURRENT_PROMISES_TS、MUTATION_TS、MUTATION_END_TS 用到
+// 但是 MUTATION 中用的是 -1，不用管这个 -1，实际上在 revalidate 中判断为 < 就行了
 const now = (() => {
   let ts = 0
   return () => ++ts
@@ -79,6 +87,9 @@ if (!IS_SERVER && window.addEventListener) {
   )
 }
 
+// 触发 onUpdate 方法。
+// 如果 shouldRevalidate 为 false，仅仅从 cache 中拿出值进行更新，不会 revalidate
+// 就 mutate 中，没有 data 时使用了一次，不用管 shouldRevalidate 为 false 的情形。
 const trigger: triggerInterface = (_key, shouldRevalidate = true) => {
   // we are ignoring the second argument which correspond to the arguments
   // the fetcher will receive when key is an array
@@ -109,6 +120,7 @@ const trigger: triggerInterface = (_key, shouldRevalidate = true) => {
   return Promise.resolve(cache.get(key))
 }
 
+// 广播的时候都不会触发 revalidate
 const broadcastState: broadcastStateInterface = (
   key,
   data,
@@ -123,6 +135,8 @@ const broadcastState: broadcastStateInterface = (
   }
 }
 
+// 主要是修改过程中报错了
+// 修改过程中又有了另一个修改或产生了另一个 validate
 const mutate: mutateInterface = async (
   _key,
   _data,
@@ -166,6 +180,9 @@ const mutate: mutateInterface = async (
     data = _data
   }
 
+  // 如果当前修改过程中产生了另一个修改，或者 validate，都会终止
+  // 终止的返回为 throw 一个 error 或返回 data
+  // 实际上是 Promise reject 或 resolve
   const shouldAbort = (): boolean | void => {
     // check if other mutations have occurred since we've started this mutation
     if (
@@ -332,6 +349,7 @@ function useSWR<Data = any, Error = any>(
   const initialMountedRef = useRef(false)
 
   // do unmount check for callbacks
+  // 通知给 config 中的一些事件的
   const eventsRef = useRef({
     emit: (event, ...params) => {
       if (unmountedRef.current) return
@@ -370,6 +388,8 @@ function useSWR<Data = any, Error = any>(
   }
 
   // start a revalidation
+  // 如果 dedupe 是 false，其默认值是 false，一定会产生新的请求
+  // 如果 dedupe 是 true，且当前没有合法请求，那么会产生新的
   const revalidate = useCallback(
     async (
       revalidateOpts: RevalidateOptionInterface = {}
@@ -378,6 +398,7 @@ function useSWR<Data = any, Error = any>(
       if (unmountedRef.current) return false
       revalidateOpts = Object.assign({ dedupe: false }, revalidateOpts)
 
+      // loading 是为了 loadingTimeout，以触发 onLoadingSlow
       let loading = true
       let shouldDeduping =
         typeof CONCURRENT_PROMISES[key] !== 'undefined' && revalidateOpts.dedupe
@@ -435,6 +456,7 @@ function useSWR<Data = any, Error = any>(
           eventsRef.current.emit('onSuccess', newData, key, config)
         }
 
+        // 已经拿到 data 数据了，判断这个数据是否需要
         // if there're other ongoing request(s), started after the current one,
         // we need to ignore the current one to avoid possible race conditions:
         //   req1------------------>res1        (current one)
@@ -662,6 +684,7 @@ function useSWR<Data = any, Error = any>(
     }
   }, [key, revalidate])
 
+  // 数据正常时的轮询操作
   useIsomorphicLayoutEffect(() => {
     let timer = null
     const tick = async () => {
@@ -763,6 +786,8 @@ function useSWR<Data = any, Error = any>(
         CONCURRENT_PROMISES[key] &&
         typeof CONCURRENT_PROMISES[key].then === 'function'
       ) {
+        // 在 suspense 模式，抛出一个 promise 后，
+        // React 会在 promise resolve 时重新触发一次 render
         // if it is a promise
         throw CONCURRENT_PROMISES[key]
       }

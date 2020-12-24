@@ -105,9 +105,12 @@ function useSWRInfinite<Data = any, Error = any>(
     pageCountCacheKey = 'size@' + firstPageKey
     cachedPageSize = cache.get(pageCountCacheKey)
   }
+
+  // 拉取多少页的数据
   const pageCountRef = useRef<number>(cachedPageSize || initialSize)
   const didMountRef = useRef<boolean>(false)
 
+  // 当 key 改变时，只拉取前 initialSize 页的数据，可忽略。
   // every time the key changes, we reset the page size if it's not persisted
   useEffect(() => {
     if (didMountRef.current) {
@@ -142,6 +145,12 @@ function useSWRInfinite<Data = any, Error = any>(
 
         // get the current page cache
         let pageData = cache.get(pageKey)
+
+        // (originalData && !config.compare(originalData[i], pageData))
+        // 这个比较是指：mutate 中修改了 originalData 且修改后不相等了。
+        // 即只重新 fetch 修改的那一页。
+        // 修改的时候不要把 data 重新赋值成新的数组，应该直接在原数组上改某一页的数据。
+        // 否则 originalData[i] 的值实际上没有变。
 
         // must revalidate if:
         // - forced to revalidate all
@@ -185,6 +194,8 @@ function useSWRInfinite<Data = any, Error = any>(
 
   const mutate = useCallback(
     (data, shouldRevalidate = true) => {
+      // 只有 shouldRevalidate 时才设置 contextCacheKey
+      // 因为这时才会触发 revalidate
       if (shouldRevalidate && typeof data !== 'undefined') {
         // we only revalidate the pages that are changed
         const originalData = dataRef.current

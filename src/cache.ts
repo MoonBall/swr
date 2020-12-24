@@ -68,6 +68,7 @@ export default class Cache implements CacheInterface {
     return [key, args, errorKey, isValidatingKey]
   }
 
+  // 给测试代码用的，实际使用中为用到
   subscribe(listener: cacheListener) {
     if (typeof listener !== 'function') {
       throw new Error('Expected the listener to be a function.')
